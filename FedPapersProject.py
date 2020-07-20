@@ -1,31 +1,21 @@
-import skfuzzy as fuzz
-import string
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
 import nltk
-from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
 from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
-nltk.download('punkt')
-word_tokenizer = nltk.tokenize.RegexpTokenizer(r'\w+')
-
-
-def preprocess(f1):
-    f = f1.read()
-    f = f.lower().translate(str.maketrans('', '', string.punctuation))
-    f = f.translate(str.maketrans('', '', string.digits))
-    return f
+import string
+import pprint
+from gensim import corpora
+from gensim import models
+from collections import defaultdict
 
 
 with open('fedpapersKnown.txt', 'r') as f1:
-    f_known = preprocess(f1)
+    f_known = f1.read().lower()
 with open('fedpapersContest.txt', 'r') as f2:
-    f_contest = preprocess(f2)
+    f_contest = f2.read().lower()
 
-
-def makeDataFrame(f):
+def makeCorpus(f):
     # splits text into paragraphs
     papersL = f.split("\n\n")
 
@@ -33,112 +23,87 @@ def makeDataFrame(f):
     starting_indexes = []
     ending_indexes = []
     for i in range(len(papersL)):
-        if papersL[i] == "to the people of the state of new york":
+        if papersL[i] == "to the people of the state of new york:":
             starting_indexes.append(i)
         if papersL[i] == "publius":
             ending_indexes.append(i)
 
-    authors = []
+    # prepares each paragraph
     paragraphs = []
     for i in range(len(starting_indexes)):
         index = starting_indexes[i] + 1
         while index < ending_indexes[i]:
-            authors.append(papersL[starting_indexes[i] - 1])
             paragraphs.append(papersL[index].replace("\n", " "))
             index += 1
+    return paragraphs
 
-    data_dict = {'authors': authors, 'paragraphs': paragraphs}
-    df = pd.DataFrame(data=data_dict)
-    return df
-
-
-def filter(f):
+def process(l):
+    # we made everything lowercase, removed punctuation and stopwords
+    # and only kept words that appeared more than once
     stop_words = set(stopwords.words('english'))
-    word_tokens = word_tokenize(f)
-    filtered_sentence = [w for w in word_tokens if not w in stop_words]
-    return filtered_sentence
+    processed_list = []
+    for i in l:
+        i = i.translate(str.maketrans('', '', string.punctuation))
+        word_tokens = word_tokenize(i)
+        filtered_sentence = [w for w in word_tokens if not w in stop_words]
+        processed_list.append(filtered_sentence)
 
+    frequency = defaultdict(int)
+    for text in processed_list:
+        for token in text:
+            frequency[token] += 1
+    processed_corpus = [[token for token in text if frequency[token] > 1] for text in processed_list]
+    return processed_corpus
 
-def get_topwords(f):
-    filtered_words = filter(f)
-    NUM_TOP_WORDS = 10
-    all_tokens = word_tokenize(' '.join(filtered_words))
-    fdist = nltk.FreqDist(all_tokens)
-    return fdist.most_common(NUM_TOP_WORDS)
+def get_term_weights(corpus, processed_corpus):
+    term_weights = []
+    for i in range(len(corpus)):
+        paragraph = corpus[i]
+        word_count = []
+        for j in range(len(processed_corpus[i])):
+            word_count.append(paragraph.count(processed_corpus[i][j]))
+        term_weights.append(word_count)
+    return term_weights
 
+def tdidf_weights(processed_corpus, term_weights):
+    weights = []
+    words_dict = corpora.Dictionary(processed_corpus)
+    bow_corpus = [words_dict.doc2bow(text) for text in processed_corpus]
+    model = models.TfidfModel(bow_corpus)
 
-def filterL(df):
-    filtered_list = []
-    for i in df.index:
-        filtered_list.append(' '.join(filter(df['paragraphs'][i])))
-    return filtered_list
+    for i in range(len(processed_corpus)):
+        tdidf = model[words_dict.doc2bow(processed_corpus[i])]
+        sum = 0
+        for j in range(len(tdidf)):
+            sum += term_weights[i][j] * tdidf[j][1]
+        weights.append(sum)
+    return weights
 
+def get_pos(corpus):
+    pos_list = []
+    for i in range(len(corpus)):
+        pos = []
+        for j in corpus[i]:
+            
 
-df_known = makeDataFrame(f_known)
-topwords_known = get_topwords(f_known)
-known_nostop = filterL(df_known)
+    # count frequencies for common POS types
+    pos_list = ['NN', 'NNP', 'DT', 'IN', 'JJ', 'NNS']
+    fvs_syntax = np.array([[ch.count(pos) for pos in pos_list]
+                       for ch in chapters_pos]).astype(np.float64)
+ 
+    # normalise by dividing each row by number of tokens in the chapter
+    fvs_syntax /= np.c_[np.array([len(ch) for ch in chapters_pos])]
 
-df_contest = makeDataFrame(f_contest)
-topwords_contest = get_topwords(f_contest)
-contest_nostop = filterL(df_contest)
-# print(df_known)
-# print(df_contest)
-# print(topwords_known)
-# print(topwords_contest)
-# print(stopwords.words('english'))
+known_corpus = makeCorpus(f_known)
+processed_known_corpus = process(known_corpus)
+known_term_weights = get_term_weights(known_corpus, processed_known_corpus)
+#known_weights = 
 
+contest_corpus = makeCorpus(f_contest)
+processed_contest_corpus = process(contest_corpus)
+contest_term_weights = get_term_weights(contest_corpus, processed_contest_corpus)
 
-xpts = np.zeros(0)  # lexical richness
-ypts = np.zeros(0)  # 
-labels = np.zeros(1)
-for i in df_known.paragraphs:
-    words = word_tokenizer.tokenize(i)
-    vocab = set(words)
-    xpts = np.hstack((xpts, len(vocab) / float(len(words))))
+# training our tdidf models
+known_tdidf_weights = tdidf_weights(processed_known_corpus, known_term_weights)
+contest_tdidf_weights = tdidf_weights(processed_contest_corpus, contest_term_weights)
 
-    #fvs_bow = vectorizer.fit_transform(key.split()).toarray().astype(np.float64)
-    # normalise by dividing each row by its Euclidean norm
-    #fvs_bow /= np.c_[np.apply_along_axis(np.linalg.norm, 1, fvs_bow)]
-    #ypts = np.hstack((ypts, fvs_bow))
-
-# Getting trigrams
-
-def get_trigrams(nostop):
-    vectorizer = CountVectorizer(ngram_range=(3, 3))
-    X1 = vectorizer.fit_transform(nostop)
-    features = (vectorizer.get_feature_names())
-    #print("\n\nFeatures : \n", features)
-    #print("\n\nX1 : \n", X1.toarray())
-
-    # Applying TFIDF
-    vectorizer = TfidfVectorizer(ngram_range=(3, 3))
-    X2 = vectorizer.fit_transform(known_nostop)
-    #scores = (X2.toarray())
-    #print("\n\nScores : \n", scores)
-
-    # Getting top ranking features
-    sums = X2.sum(axis=0)
-    data1 = []
-    for col, term in enumerate(features):
-        data1.append((term, sums[0, col]))
-    ranking = pd.DataFrame(data1, columns=['term', 'rank'])
-    words = (ranking.sort_values('rank', ascending=True))
-    return words
-
-known_trigrams = get_trigrams(known_nostop)
-contest_trigrams = get_trigrams(contest_nostop)
-#print(known_trigrams)
-#print(contest_trigrams)
-
-## Configure some general styling
-sns.set_style("white")
-plt.rcParams['font.size'] = 12
-plt.rcParams['axes.labelsize'] = 20
-plt.rcParams['axes.labelweight'] = 'bold'
-plt.rcParams['axes.titlesize'] = 20
-plt.rcParams['xtick.labelsize'] = 15
-plt.rcParams['ytick.labelsize'] = 15
-plt.rcParams['legend.fontsize'] = 15
-plt.rcParams['figure.titlesize'] = 20
-plt.rcParams['figure.figsize'] = (8,7)
-colors = ['b', 'orange', 'g', 'r', 'c', 'm', 'y', 'k', 'Brown', 'ForestGreen']
