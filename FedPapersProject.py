@@ -9,8 +9,9 @@ from gensim import corpora
 from gensim import models
 from collections import defaultdict
 from sklearn.cluster import KMeans
-word_tokenizer = nltk.tokenize.RegexpTokenizer(r'\w+')
+from sklearn.metrics import confusion_matrix
 
+word_tokenizer = nltk.tokenize.RegexpTokenizer(r'\w+')
 
 
 with open('fedpapersKnown.txt', 'r') as f1:
@@ -32,15 +33,17 @@ def makeCorpus(f):
             ending_indexes.append(i)
 
     # prepares each paragraph
-    paragraphs = []
+    documents = []
     authors = []
     for i in range(len(starting_indexes)):
         index = starting_indexes[i] + 1
+        doc = []
         while index < ending_indexes[i]:
-            paragraphs.append(papersL[index].replace("\n", " "))
-            authors.append(papersL[starting_indexes[i] - 1])
+            doc.append(papersL[index].replace("\n", " "))
             index += 1
-    return paragraphs, authors
+        documents.append(' '.join(doc))
+        authors.append(papersL[starting_indexes[i] - 1])
+    return documents, authors
 
 def process(l):
     # we made everything lowercase, removed punctuation and stopwords
@@ -98,23 +101,47 @@ def get_pos(corpus):
     fvs_syntax /= np.c_[np.array([len(word) for word in corpus])]
     return fvs_syntax
 
+def get_punctuation(corpus):
+    punct = np.zeros((len(corpus), 3))
+    for i in range(len(corpus)):
+        num_words = len(corpus[i].split())
+        # Commas per sentence
+        punct[i, 0] = corpus[i].count(',') / float(num_words)
+        # Semicolons per sentence
+        punct[i, 1] = corpus[i].count(';') / float(num_words)
+        # Colons per sentence
+        punct[i, 2] = corpus[i].count(':') / float(num_words)
+    return punct
+
+def label_to_author(labels, authors):
+    ham = authors[0]
+    l = []    
+    for i in range(len(labels)):
+        if labels[i] == ham:
+            l.append('Hamilton')
+        else:
+            l.append('Madison')
+    return l
 
 known_corpus, known_authors = makeCorpus(f_known)
 processed_known_corpus = process(known_corpus)
 known_term_weights = get_term_weights(known_corpus, processed_known_corpus)
 known_pos = get_pos(known_corpus)
+known_punct = get_punctuation(known_corpus)
 
 contest_corpus, contest_authors = makeCorpus(f_contest)
 processed_contest_corpus = process(contest_corpus)
 contest_term_weights = get_term_weights(contest_corpus, processed_contest_corpus)
 contest_pos = get_pos(contest_corpus)
+contest_punct = get_punctuation(contest_corpus)
 
 # training our tfidf models
 known_tfidf_weights = tfidf_weights(processed_known_corpus, known_term_weights)
 contest_tfidf_weights = tfidf_weights(processed_contest_corpus, contest_term_weights)
 
-known_matrix = np.concatenate((known_tfidf_weights, known_pos), axis=1)
-contest_matrix = np.concatenate((contest_tfidf_weights, contest_pos), axis=1)
+known_matrix = np.concatenate((known_tfidf_weights, known_punct), axis=1)
+contest_matrix = np.concatenate((contest_tfidf_weights, contest_punct), axis=1)
+
 
 kmeans = KMeans(n_clusters=2, random_state=0).fit(known_matrix)
 labels = kmeans.labels_
@@ -122,16 +149,19 @@ print(labels)
 
 for i in range(len(known_authors)):
     ham = labels[0]
-    mad = 1 - ham
+    mad = 1 - labels[0]
     if known_authors[i] == 'madison':
         known_authors[i] = mad
     else:
         known_authors[i] = ham
 print(known_authors)
+
+print(kmeans.predict(contest_matrix))
+print(label_to_author(kmeans.predict(contest_matrix), known_authors))
+
+#accuracy
 count = 0
 for i in range(len(known_authors)):
     if labels[i] == known_authors[i]:
         count += 1
-print(count / 937)
-
-print(kmeans.predict(contest_matrix))
+print(count / len(labels))
