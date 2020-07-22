@@ -10,7 +10,6 @@ from gensim import models
 from collections import defaultdict
 from sklearn.cluster import KMeans
 from sklearn.metrics import confusion_matrix
-
 word_tokenizer = nltk.tokenize.RegexpTokenizer(r'\w+')
 
 
@@ -46,8 +45,8 @@ def makeCorpus(f):
     return documents, authors
 
 def process(l):
-    # we made everything lowercase, removed punctuation and stopwords
-    # and only kept words that appeared more than once
+    # make everything lowercase, remove punctuation and stopwords
+    # and only keep words that appear more than once
     stop_words = set(stopwords.words('english'))
     processed_list = []
     for i in l:
@@ -73,6 +72,7 @@ def get_term_weights(corpus, processed_corpus):
         term_weights.append(word_count)
     return term_weights
 
+# get weights for each document with TF-IDF and term weights
 def tfidf_weights(processed_corpus, term_weights):
     weights = np.zeros(0)
     words_dict = corpora.Dictionary(processed_corpus)
@@ -87,20 +87,6 @@ def tfidf_weights(processed_corpus, term_weights):
         weights = np.hstack((weights, [total]))
     return np.vstack(weights)
 
-def token_to_pos(ch):
-    tokens = nltk.word_tokenize(ch)
-    return [p[1] for p in nltk.pos_tag(tokens)]
-
-def get_pos(corpus):
-    corpus_pos = [token_to_pos(word) for word in corpus]
-    # count frequencies for common POS types
-    pos_list = ['NN', 'NNP', 'DT', 'IN', 'JJ', 'NNS']
-    fvs_syntax = np.array([[word.count(pos) for pos in pos_list]
-                              for word in corpus_pos]).astype(np.float64)
-    # normalise by dividing each row by number of tokens in the books
-    fvs_syntax /= np.c_[np.array([len(word) for word in corpus])]
-    return fvs_syntax
-
 def get_punctuation(corpus):
     punct = np.zeros((len(corpus), 3))
     for i in range(len(corpus)):
@@ -113,55 +99,66 @@ def get_punctuation(corpus):
         punct[i, 2] = corpus[i].count(':') / float(num_words)
     return punct
 
-def label_to_author(labels, authors):
-    ham = authors[0]
+# converts the list of labels to authors
+def num_to_author(labels, authors):
+    count = 0
+    a1 = 0
     l = []    
     for i in range(len(labels)):
-        if labels[i] == ham:
-            l.append('Hamilton')
-        else:
-            l.append('Madison')
+        count = count+1 if labels[i] == 0 else count-1
+
+    if count >= 0: a1 = 1 
+
+    for i in range(len(labels)):
+        l.append('Madison') if labels[i] == a1 else l.append('Hamilton')
     return l
+
+# converts the list of authors to labels
+def author_to_num(authors, labels):
+    count = 0
+    a1 = ''
+    l = []
+    for i in range(len(labels)):
+        count = count+1 if authors[i] == 'hamilton' else count-1
+
+    a1 = 'hamilton' if count >= 0 else 'madison'
+
+    for i in range(len(authors)):
+        l.append(0) if authors[i] == a1 else l.append(1)
+    return l
+
+
+def get_accuracy(authors, labels):
+    count = 0
+    for i in range(len(authors)):
+        if labels[i] == authors[i]:
+            count += 1
+    return count / len(labels)
+
 
 known_corpus, known_authors = makeCorpus(f_known)
 processed_known_corpus = process(known_corpus)
 known_term_weights = get_term_weights(known_corpus, processed_known_corpus)
-known_pos = get_pos(known_corpus)
 known_punct = get_punctuation(known_corpus)
 
 contest_corpus, contest_authors = makeCorpus(f_contest)
 processed_contest_corpus = process(contest_corpus)
 contest_term_weights = get_term_weights(contest_corpus, processed_contest_corpus)
-contest_pos = get_pos(contest_corpus)
 contest_punct = get_punctuation(contest_corpus)
 
 # training our tfidf models
 known_tfidf_weights = tfidf_weights(processed_known_corpus, known_term_weights)
 contest_tfidf_weights = tfidf_weights(processed_contest_corpus, contest_term_weights)
 
+# make matrix
 known_matrix = np.concatenate((known_tfidf_weights, known_punct), axis=1)
 contest_matrix = np.concatenate((contest_tfidf_weights, contest_punct), axis=1)
 
-
+# train KMeans model
 kmeans = KMeans(n_clusters=2, random_state=0).fit(known_matrix)
 labels = kmeans.labels_
-print(labels)
 
-for i in range(len(known_authors)):
-    ham = labels[0]
-    mad = 1 - labels[0]
-    if known_authors[i] == 'madison':
-        known_authors[i] = mad
-    else:
-        known_authors[i] = ham
-print(known_authors)
 
-print(kmeans.predict(contest_matrix))
-print(label_to_author(kmeans.predict(contest_matrix), known_authors))
-
-#accuracy
-count = 0
-for i in range(len(known_authors)):
-    if labels[i] == known_authors[i]:
-        count += 1
-print(count / len(labels))
+print("predicted labels:", kmeans.predict(contest_matrix))
+print("predicted authors:", num_to_author(kmeans.predict(contest_matrix), known_authors))
+print("accuracy:", get_accuracy(author_to_num(known_authors, labels), labels))
