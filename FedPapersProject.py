@@ -158,7 +158,10 @@ contest_matrix = np.concatenate((contest_tfidf_weights, contest_punct), axis=1)
 kmeans = KMeans(n_clusters=2, random_state=0).fit(known_matrix)
 labels = kmeans.labels_
 
+labels_predict = kmeans.predict(contest_matrix)
+authors_predict = num_to_author(kmeans.predict(contest_matrix), known_authors)
+accuracy = get_accuracy(author_to_num(known_authors, labels), labels)
 
-print("predicted labels:", kmeans.predict(contest_matrix))
-print("predicted authors:", num_to_author(kmeans.predict(contest_matrix), known_authors))
-print("accuracy:", get_accuracy(author_to_num(known_authors, labels), labels))
+print("predicted labels:", labels_predict)
+print("predicted authors:", authors_predict)
+print("accuracy:", accuracy)
